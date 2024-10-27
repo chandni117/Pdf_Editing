@@ -1,43 +1,35 @@
-
 import React, { useState, useRef } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { PDFDocument, rgb } from 'pdf-lib';
 import SignatureCanvas from 'react-signature-canvas';
 import './PdfEditor.css';
+
 const PdfEditor = () => {
-  pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-    "pdfjs-dist/build/pdf.worker.min.js",
-    import.meta.url)
-    .toString();
-    console.log(pdfjs.GlobalWorkerOptions.workerSrc);
-    
+  pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+
   const [pdfFile, setPdfFile] = useState(null);
   const [numPages, setNumPages] = useState(0);
   const [formFields, setFormFields] = useState([]);
   const [isEditing, setIsEditing] = useState(false);
+  const [showPdf, setShowPdf] = useState(false);
   const sigCanvas = useRef(null);
 
-  console.log("Current pdfFile:", pdfFile); 
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
     if (file && file.type === 'application/pdf') {
-      console.log("Selected file:", file); // Log File object
-            const fileUrl = URL.createObjectURL(file); // Create object URL
-            setPdfFile(fileUrl); // Update state
-            console.log("PDF URL:", fileUrl); // Log URL
-      setIsEditing(false); // Reset editing state when a new PDF is uploaded
+      const fileUrl = URL.createObjectURL(file);
+      console.log("PDF URL:", fileUrl);
+      setPdfFile(fileUrl);
+      setNumPages(0);
+      setFormFields([]);
+      setIsEditing(false);
+      setShowPdf(false);
+    } else {
+      console.error("Selected file is not a valid PDF.");
     }
-
-    const reader = new FileReader()
-    reader.onload = e => {
-      setPdfFile(URL.createObjectURL(file));
-    }
-
-    
   };
 
   const onDocumentLoadSuccess = ({ numPages }) => {
-    //console.log("PDF loaded with pages:", numPages);
     setNumPages(numPages);
     console.log(`Loaded a document with ${numPages} pages.`);
   };
@@ -71,7 +63,6 @@ const PdfEditor = () => {
       const pages = pdfDoc.getPages();
       const firstPage = pages[0];
 
-      // Process each field
       for (const field of formFields) {
         if (field.type === 'text') {
           firstPage.drawText(field.value, {
@@ -133,18 +124,26 @@ const PdfEditor = () => {
         </div>
       ) : (
         <div>
-          <button onClick={() => setIsEditing(true)}>Open PDF</button>
+          <button onClick={() => { setIsEditing(true); setShowPdf(true); }}>Open PDF</button>
         </div>
       )}
 
-      {isEditing && pdfFile &&  (
-        <div >
-          <Document file={pdfFile} onLoadSuccess={onDocumentLoadSuccess}>
-            { Array.from(new Array(numPages), (el, index) => (
+      {showPdf && pdfFile && (
+        <div>
+          <Document
+            file={pdfFile}
+            onLoadSuccess={onDocumentLoadSuccess}
+            onLoadError={(error) => console.error("Error loading PDF:", error)}
+          >
+            {Array.from(new Array(numPages), (el, index) => (
               <Page key={index} pageNumber={index + 1} />
             ))}
           </Document>
+        </div>
+      )}
 
+      {isEditing && pdfFile && (
+        <div style={{ position: 'relative' }}>
           <div>
             <button onClick={() => addField('text')}>Add Text Field</button>
             <button onClick={() => addField('checkbox')}>Add Checkbox</button>
@@ -190,4 +189,3 @@ const PdfEditor = () => {
 };
 
 export default PdfEditor;
-
