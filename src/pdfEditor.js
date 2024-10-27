@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { PDFDocument, rgb } from 'pdf-lib';
 import SignatureCanvas from 'react-signature-canvas';
@@ -13,6 +13,14 @@ const PdfEditor = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [selectedFieldType, setSelectedFieldType] = useState(null);
   const sigCanvas = useRef(null);
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    const savedFields = localStorage.getItem('formFields');
+    if (savedFields) {
+      setFormFields(JSON.parse(savedFields));
+    }
+  }, []);
 
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
@@ -20,7 +28,6 @@ const PdfEditor = () => {
       const fileUrl = URL.createObjectURL(file);
       setPdfFile(fileUrl);
       setNumPages(0);
-      setFormFields([]);
       setIsEditing(false);
     } else {
       console.error("Selected file is not a valid PDF.");
@@ -28,7 +35,6 @@ const PdfEditor = () => {
   };
 
   const onDocumentLoadSuccess = ({ numPages }) => {
-    console.log("Number of pages when  document is loaded: ",numPages)
     setNumPages(numPages);
   };
 
@@ -37,21 +43,18 @@ const PdfEditor = () => {
       const rect = e.currentTarget.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
-
-      // Determine which page is clicked
-      const pageIndex = Math.floor(y / (rect.height / numPages)); // Calculate which page number is clicked
-
-      // Log the exact position and page index
-      console.log(`Field Type: ${selectedFieldType}, Page: ${pageIndex + 1}, X: ${x}, Y: ${y}`);
-
-      addField(selectedFieldType, x, y, pageIndex + 1); // Pass page number
+      const pageIndex = Math.floor(y / (rect.height / numPages));
+      addField(selectedFieldType, x, y, pageIndex + 1);
     }
   };
 
   const addField = (type, x = 100, y = 100, pageNumber = 1) => {
     if (numPages > 0 && selectedFieldType) {
-      setFormFields([...formFields, { type, value: '', x, y, id: Date.now(), pageNumber }]);
-      setSelectedFieldType(null); // Reset selected type after adding
+      const newField = { type, value: '', x, y, id: Date.now(), pageNumber };
+      const updatedFields = [...formFields, newField];
+      setFormFields(updatedFields);
+      setSelectedFieldType(null);
+      localStorage.setItem('formFields', JSON.stringify(updatedFields));
     }
   };
 
@@ -61,12 +64,8 @@ const PdfEditor = () => {
       const pdfDoc = await PDFDocument.load(existingPdfBytes);
 
       for (const field of formFields) {
-        const pageNumber = field.pageNumber - 1; // Adjust for 0-based index
-
-        if (pageNumber >= pdfDoc.getPageCount() || pageNumber < 0) {
-          console.warn(`Field on page ${field.pageNumber} exceeds page count. Skipping...`);
-          continue; // Skip if the page number is out of bounds
-        }
+        const pageNumber = field.pageNumber - 1;
+        if (pageNumber >= pdfDoc.getPageCount() || pageNumber < 0) continue;
 
         const page = pdfDoc.getPage(pageNumber);
         const pdfHeight = page.getHeight();
@@ -74,7 +73,7 @@ const PdfEditor = () => {
         if (field.type === 'text') {
           page.drawText(field.value, {
             x: field.x,
-            y: pdfHeight - field.y - 12, // Invert y coordinate for PDF
+            y: pdfHeight - field.y - 12,
             size: 12,
             color: rgb(0, 0, 0),
           });
@@ -99,14 +98,18 @@ const PdfEditor = () => {
             const pngImageBytes = sigCanvas.current.getTrimmedCanvas().toDataURL();
             const pngImage = await pdfDoc.embedPng(pngImageBytes);
             page.drawImage(pngImage, { x: field.x, y: pdfHeight - field.y - 50, width: 100, height: 50 });
-          } else {
-            console.warn("Signature canvas is empty or not initialized");
           }
         }
       }
-  
+
       const pdfBytes = await pdfDoc.save();
       download(pdfBytes, "modified.pdf", "application/pdf");
+
+      // Clear pdfFile and file input to allow re-uploading
+      setPdfFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = null;
+      }
     } catch (error) {
       console.error('Error saving modified PDF:', error);
     }
@@ -127,7 +130,7 @@ const PdfEditor = () => {
       <h1>PDF Editor</h1>
       {!pdfFile ? (
         <div>
-          <input type="file" accept="application/pdf" onChange={handleFileUpload} />
+          <input type="file" accept="application/pdf" onChange={handleFileUpload} ref={fileInputRef} />
         </div>
       ) : (
         <div>
@@ -168,6 +171,7 @@ const PdfEditor = () => {
                       f.id === field.id ? { ...f, value: e.target.value } : f
                     );
                     setFormFields(updatedFields);
+                    localStorage.setItem('formFields', JSON.stringify(updatedFields));
                   }}
                 />
               )}
