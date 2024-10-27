@@ -11,78 +11,85 @@ const PdfEditor = () => {
   const [numPages, setNumPages] = useState(0);
   const [formFields, setFormFields] = useState([]);
   const [isEditing, setIsEditing] = useState(false);
-  const [showPdf, setShowPdf] = useState(false);
+  const [selectedFieldType, setSelectedFieldType] = useState(null);
   const sigCanvas = useRef(null);
 
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
     if (file && file.type === 'application/pdf') {
       const fileUrl = URL.createObjectURL(file);
-      console.log("PDF URL:", fileUrl);
       setPdfFile(fileUrl);
       setNumPages(0);
       setFormFields([]);
       setIsEditing(false);
-      setShowPdf(false);
     } else {
       console.error("Selected file is not a valid PDF.");
     }
   };
 
   const onDocumentLoadSuccess = ({ numPages }) => {
+    console.log("Number of pages when  document is loaded: ",numPages)
     setNumPages(numPages);
-    console.log(`Loaded a document with ${numPages} pages.`);
   };
 
-  const addField = (type) => {
-    setFormFields([...formFields, { type, value: '', x: 100, y: 100, id: Date.now() }]);
+  const handleClick = (e) => {
+    if (selectedFieldType) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      // Determine which page is clicked
+      const pageIndex = Math.floor(y / (rect.height / numPages)); // Calculate which page number is clicked
+
+      // Log the exact position and page index
+      console.log(`Field Type: ${selectedFieldType}, Page: ${pageIndex + 1}, X: ${x}, Y: ${y}`);
+
+      addField(selectedFieldType, x, y, pageIndex + 1); // Pass page number
+    }
   };
 
-  const handleDrag = (e, id) => {
-    const field = formFields.find(f => f.id === id);
-    const handleMouseMove = (e) => {
-      const updatedFields = formFields.map(f =>
-        f.id === id ? { ...field, x: e.clientX - 50, y: e.clientY - 20 } : f
-      );
-      setFormFields(updatedFields);
-    };
-
-    const handleMouseUp = () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+  const addField = (type, x = 100, y = 100, pageNumber = 1) => {
+    if (numPages > 0 && selectedFieldType) {
+      setFormFields([...formFields, { type, value: '', x, y, id: Date.now(), pageNumber }]);
+      setSelectedFieldType(null); // Reset selected type after adding
+    }
   };
 
   const saveModifiedPdf = async () => {
     try {
       const existingPdfBytes = await fetch(pdfFile).then(res => res.arrayBuffer());
       const pdfDoc = await PDFDocument.load(existingPdfBytes);
-      const pages = pdfDoc.getPages();
-      const firstPage = pages[0];
 
       for (const field of formFields) {
+        const pageNumber = field.pageNumber - 1; // Adjust for 0-based index
+
+        if (pageNumber >= pdfDoc.getPageCount() || pageNumber < 0) {
+          console.warn(`Field on page ${field.pageNumber} exceeds page count. Skipping...`);
+          continue; // Skip if the page number is out of bounds
+        }
+
+        const page = pdfDoc.getPage(pageNumber);
+        const pdfHeight = page.getHeight();
+
         if (field.type === 'text') {
-          firstPage.drawText(field.value, {
+          page.drawText(field.value, {
             x: field.x,
-            y: field.y,
+            y: pdfHeight - field.y - 12, // Invert y coordinate for PDF
             size: 12,
             color: rgb(0, 0, 0),
           });
         } else if (field.type === 'checkbox') {
-          firstPage.drawRectangle({
+          page.drawRectangle({
             x: field.x,
-            y: field.y - 10,
+            y: pdfHeight - field.y - 10,
             width: 10,
             height: 10,
             color: rgb(0, 0, 0),
           });
         } else if (field.type === 'radio') {
-          firstPage.drawEllipse({
+          page.drawEllipse({
             x: field.x,
-            y: field.y,
+            y: pdfHeight - field.y,
             xScale: 10,
             yScale: 10,
             color: rgb(0, 0, 0),
@@ -91,13 +98,13 @@ const PdfEditor = () => {
           if (sigCanvas.current && !sigCanvas.current.isEmpty()) {
             const pngImageBytes = sigCanvas.current.getTrimmedCanvas().toDataURL();
             const pngImage = await pdfDoc.embedPng(pngImageBytes);
-            firstPage.drawImage(pngImage, { x: field.x, y: field.y, width: 100, height: 50 });
+            page.drawImage(pngImage, { x: field.x, y: pdfHeight - field.y - 50, width: 100, height: 50 });
           } else {
             console.warn("Signature canvas is empty or not initialized");
           }
         }
       }
-
+  
       const pdfBytes = await pdfDoc.save();
       download(pdfBytes, "modified.pdf", "application/pdf");
     } catch (error) {
@@ -124,12 +131,12 @@ const PdfEditor = () => {
         </div>
       ) : (
         <div>
-          <button onClick={() => { setIsEditing(true); setShowPdf(true); }}>Open PDF</button>
+          <button onClick={() => setIsEditing(true)}>Open PDF</button>
         </div>
       )}
 
-      {showPdf && pdfFile && (
-        <div>
+      {isEditing && pdfFile && (
+        <div style={{ position: 'relative', width: '100%', height: '100vh' }} onClick={handleClick}>
           <Document
             file={pdfFile}
             onLoadSuccess={onDocumentLoadSuccess}
@@ -139,23 +146,18 @@ const PdfEditor = () => {
               <Page key={index} pageNumber={index + 1} />
             ))}
           </Document>
-        </div>
-      )}
 
-      {isEditing && pdfFile && (
-        <div style={{ position: 'relative' }}>
           <div>
-            <button onClick={() => addField('text')}>Add Text Field</button>
-            <button onClick={() => addField('checkbox')}>Add Checkbox</button>
-            <button onClick={() => addField('radio')}>Add Radio Button</button>
-            <button onClick={() => addField('esign')}>Add E-Signature</button>
+            <button onClick={() => setSelectedFieldType('text')}>Add Text Field</button>
+            <button onClick={() => setSelectedFieldType('checkbox')}>Add Checkbox</button>
+            <button onClick={() => setSelectedFieldType('radio')}>Add Radio Button</button>
+            <button onClick={() => setSelectedFieldType('esign')}>Add E-Signature</button>
           </div>
 
           {formFields.map((field) => (
             <div
               key={field.id}
-              style={{ position: 'absolute', top: field.y, left: field.x }}
-              onMouseDown={(e) => handleDrag(e, field.id)}
+              style={{ position: 'absolute', top: field.y, left: field.x, cursor: 'move' }}
             >
               {field.type === 'text' && (
                 <input
